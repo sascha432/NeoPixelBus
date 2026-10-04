@@ -2,7 +2,7 @@
 NeoPixel library helper functions for Esp32.
 
 A BIG thanks to Andreas Merkle for the investigation and implementation of
-a workaround to the GCC bug that drops method attributes from template methods 
+a workaround to the GCC bug that drops method attributes from template methods
 
 Written by Michael C. Miller.
 
@@ -49,11 +49,26 @@ extern "C"
 #include <driver/rmt.h>
 }
 
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 3, 0)
-#define NEOPIXELBUS_RMT_INT_FLAGS (ESP_INTR_FLAG_LOWMED)
-#else
-#define NEOPIXELBUS_RMT_INT_FLAGS (ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_LEVEL1)
+// Patch (KFC firmware, see README "Patch for Makuna/NeoPixelBus#921"): the RMT driver feeds the LED data
+// from its interrupt, the refill has to fire within half of the channel memory (see mem_block_num below).
+// Upstream installs the ISR with ESP_INTR_FLAG_LOWMED on IDF >= 4.3 - not IRAM safe and the lowest priority -
+// so flash cache off windows (NVS/LittleFS writes) or higher priority interrupts (WiFi, DMA) that delay the
+// refill make the hardware replay stale memory: the strip latches in the middle of the frame and the rest of
+// the frame is shifted (flicker, "moving start LED"). Same flags FastLED's ESP32 RMT driver uses.
+// Override with -D NEOPIXELBUS_RMT_INT_FLAGS=... for A/B tests.
+#ifndef NEOPIXELBUS_RMT_INT_FLAGS
+#define NEOPIXELBUS_RMT_INT_FLAGS (ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_LEVEL3)
 #endif
+
+// Patch (KFC firmware, see README "Patch for Makuna/NeoPixelBus#921"): number of RMT memory blocks per
+// channel (1-8), upstream hardcodes this to 1 (64 items, ~80us). The driver refills the channel memory from
+// its threshold interrupt, which is set to half of that memory, and the TX ping-pong is always enabled, so a
+// single block leaves only ~40us for the refill and a late interrupt makes the hardware transmit data of the
+// memory a second time. Every block adds 64 items (~80us of WS2812 data) of headroom. The application sets
+// the value before the bus is initialized: a channel with N blocks occupies the memory of the N-1 blocks that
+// follow it (ESP32: 8 blocks in total -> 8 for one strip, 4 for two, channels spaced by N). FastLED uses 2
+// blocks per channel, its 4.x driver sizes the buffer from the network state instead.
+extern uint8_t gNeoPixelBusRmtMemBlocks;
 
 class NeoEsp32RmtSpeed
 {
@@ -61,7 +76,7 @@ public:
     // ClkDiv of 2 provides for good resolution and plenty of reset resolution; but
     // a ClkDiv of 1 will provide enough space for the longest reset and does show
     // little better pulse accuracy
-    const static uint8_t RmtClockDivider = 2; 
+    const static uint8_t RmtClockDivider = 2;
 
     inline constexpr static uint32_t FromNs(uint32_t ns)
     {
@@ -72,7 +87,7 @@ protected:
     const static uint32_t RmtCpu = 80000000L; // 80 mhz RMT clock
     const static uint32_t NsPerSecond = 1000000000L;
     const static uint32_t RmtTicksPerSecond = (RmtCpu / RmtClockDivider);
-    const static uint32_t NsPerRmtTick = (NsPerSecond / RmtTicksPerSecond); // about 25 
+    const static uint32_t NsPerRmtTick = (NsPerSecond / RmtTicksPerSecond); // about 25
 
     static void IRAM_ATTR _translate(const void* src,
         rmt_item32_t* dest,
@@ -115,8 +130,8 @@ public:
 class NeoEsp32RmtSpeedWs2811 : public NeoEsp32RmtSpeedBase
 {
 public:
-    const static DRAM_ATTR uint32_t RmtBit0 = Item32Val(300, 950); 
-    const static DRAM_ATTR uint32_t RmtBit1 = Item32Val(900, 350); 
+    const static DRAM_ATTR uint32_t RmtBit0 = Item32Val(300, 950);
+    const static DRAM_ATTR uint32_t RmtBit1 = Item32Val(900, 350);
     const static DRAM_ATTR uint16_t RmtDurationReset = FromNs(300000); // 300us
 
     static void IRAM_ATTR Translate(const void* src,
@@ -160,8 +175,8 @@ public:
 class NeoEsp32RmtSpeedSk6812 : public NeoEsp32RmtSpeedBase
 {
 public:
-    const static DRAM_ATTR uint32_t RmtBit0 = Item32Val(400, 850); 
-    const static DRAM_ATTR uint32_t RmtBit1 = Item32Val(800, 450); 
+    const static DRAM_ATTR uint32_t RmtBit0 = Item32Val(400, 850);
+    const static DRAM_ATTR uint32_t RmtBit1 = Item32Val(800, 450);
     const static DRAM_ATTR uint16_t RmtDurationReset = FromNs(80000); // 80us
 
     static void IRAM_ATTR Translate(const void* src,
@@ -223,8 +238,8 @@ public:
 class NeoEsp32RmtSpeed800Kbps : public NeoEsp32RmtSpeedBase
 {
 public:
-    const static DRAM_ATTR uint32_t RmtBit0 = Item32Val(400, 850); 
-    const static DRAM_ATTR uint32_t RmtBit1 = Item32Val(800, 450); 
+    const static DRAM_ATTR uint32_t RmtBit0 = Item32Val(400, 850);
+    const static DRAM_ATTR uint32_t RmtBit1 = Item32Val(800, 450);
     const static DRAM_ATTR uint16_t RmtDurationReset = FromNs(50000); // 50us
 
     static void IRAM_ATTR Translate(const void* src,
@@ -238,8 +253,8 @@ public:
 class NeoEsp32RmtSpeed400Kbps : public NeoEsp32RmtSpeedBase
 {
 public:
-    const static DRAM_ATTR uint32_t RmtBit0 = Item32Val(800, 1700); 
-    const static DRAM_ATTR uint32_t RmtBit1 = Item32Val(1600, 900); 
+    const static DRAM_ATTR uint32_t RmtBit0 = Item32Val(800, 1700);
+    const static DRAM_ATTR uint32_t RmtBit1 = Item32Val(1600, 900);
     const static DRAM_ATTR uint16_t RmtDurationReset = FromNs(50000); // 50us
 
     static void IRAM_ATTR Translate(const void* src,
@@ -268,8 +283,8 @@ public:
 class NeoEsp32RmtSpeedTx1812 : public NeoEsp32RmtSpeedBase
 {
 public:
-    const static DRAM_ATTR uint32_t RmtBit0 = Item32Val(300, 600); 
-    const static DRAM_ATTR uint32_t RmtBit1 = Item32Val(600, 300); 
+    const static DRAM_ATTR uint32_t RmtBit0 = Item32Val(300, 600);
+    const static DRAM_ATTR uint32_t RmtBit1 = Item32Val(600, 300);
     const static DRAM_ATTR uint16_t RmtDurationReset = FromNs(80000); // 80us
 
     static void IRAM_ATTR Translate(const void* src,
@@ -451,8 +466,8 @@ public:
 class NeoEsp32RmtInvertedSpeedTx1812 : public NeoEsp32RmtInvertedSpeedBase
 {
 public:
-    const static DRAM_ATTR uint32_t RmtBit0 = Item32Val(300, 600); 
-    const static DRAM_ATTR uint32_t RmtBit1 = Item32Val(600, 300); 
+    const static DRAM_ATTR uint32_t RmtBit0 = Item32Val(300, 600);
+    const static DRAM_ATTR uint32_t RmtBit1 = Item32Val(600, 300);
     const static DRAM_ATTR uint16_t RmtDurationReset = FromNs(80000); // 80us
 
     static void IRAM_ATTR Translate(const void* src,
@@ -618,9 +633,9 @@ public:
         config.rmt_mode = RMT_MODE_TX;
         config.channel = _channel.RmtChannelNumber;
         config.gpio_num = static_cast<gpio_num_t>(_pin);
-        config.mem_block_num = 1;
+        config.mem_block_num = gNeoPixelBusRmtMemBlocks;
         config.tx_config.loop_en = false;
-        
+
         config.tx_config.idle_output_en = true;
         config.tx_config.idle_level = T_SPEED::IdleLevel;
 
@@ -685,7 +700,7 @@ public:
     }
 
 private:
-    const size_t  _sizeData;      // Size of '_data*' buffers 
+    const size_t  _sizeData;      // Size of '_data*' buffers
     const uint8_t _pin;            // output pin number
     const T_CHANNEL _channel; // holds instance for multi channel support
 
@@ -772,7 +787,7 @@ typedef NeoEsp32RmtMethodBase<NeoEsp32RmtSpeed800Kbps, NeoEsp32RmtChannel3> NeoE
 typedef NeoEsp32RmtMethodBase<NeoEsp32RmtSpeed400Kbps, NeoEsp32RmtChannel3> NeoEsp32Rmt3400KbpsMethod;
 typedef NeoEsp32Rmt3Ws2805Method NeoEsp32Rmt3Ws2814Method;
 
-#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32S3) 
+#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32S3)
 
 typedef NeoEsp32RmtMethodBase<NeoEsp32RmtSpeedWs2811, NeoEsp32RmtChannel4> NeoEsp32Rmt4Ws2811Method;
 typedef NeoEsp32RmtMethodBase<NeoEsp32RmtSpeedWs2812x, NeoEsp32RmtChannel4> NeoEsp32Rmt4Ws2812xMethod;
@@ -834,7 +849,7 @@ typedef NeoEsp32RmtMethodBase<NeoEsp32RmtSpeed800Kbps, NeoEsp32RmtChannel7> NeoE
 typedef NeoEsp32RmtMethodBase<NeoEsp32RmtSpeed400Kbps, NeoEsp32RmtChannel7> NeoEsp32Rmt7400KbpsMethod;
 typedef NeoEsp32Rmt7Ws2805Method NeoEsp32Rmt7Ws2814Method;
 
-#endif // !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32S3) 
+#endif // !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32S3)
 #endif // !defined(CONFIG_IDF_TARGET_ESP32C3)
 
 // inverted
@@ -977,13 +992,13 @@ typedef NeoEsp32RmtMethodBase<NeoEsp32RmtInvertedSpeed800Kbps, NeoEsp32RmtChanne
 typedef NeoEsp32RmtMethodBase<NeoEsp32RmtInvertedSpeed400Kbps, NeoEsp32RmtChannel7> NeoEsp32Rmt7400KbpsInvertedMethod;
 typedef NeoEsp32Rmt7Ws2805InvertedMethod NeoEsp32Rmt7Ws2814InvertedMethod;
 
-#endif // !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32S3) 
+#endif // !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32S3)
 #endif // !defined(CONFIG_IDF_TARGET_ESP32C3)
 
 
 #if defined(NEOPIXEL_ESP32_RMT_DEFAULT) || defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32S3)
 
-// Normally I2s method is the default, defining NEOPIXEL_ESP32_RMT_DEFAULT 
+// Normally I2s method is the default, defining NEOPIXEL_ESP32_RMT_DEFAULT
 // will switch to use RMT as the default method
 // The ESP32S2, ESP32S3, and ESP32C3 will always defualt to RMT
 

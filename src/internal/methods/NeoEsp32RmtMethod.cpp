@@ -35,12 +35,20 @@ License along with NeoPixel.  If not, see
 #include "../NeoBusChannel.h"
 #include "NeoEsp32RmtMethod.h"
 
+// KFC firmware patch: see NeoEsp32RmtMethod.h. One RMT memory block is not enough when other
+// interrupts compete for the CPU - the refill interrupt has to fill the channel memory every
+// ~40us. The application raises this (the number of blocks must be chosen so that the channels do
+// not overlap in memory).
+// Patch (KFC firmware, see README "Patch for Makuna/NeoPixelBus#921"): 1 keeps the upstream behavior,
+// the application sets the value before the bus is initialized (see NeoEsp32RmtMethod.h)
+uint8_t gNeoPixelBusRmtMemBlocks = 1;
+
 // translate NeoPixelBuffer into RMT buffer
 // this is done on the fly so we don't require a send buffer in raw RMT format
 // which would be 32x larger than the primary buffer
 //
 // NOTE:  This was moved from the template below to here to workaround a GCC bug
-//  That bug is that the IRAM_ATTR attribute (any attributes) is lost on template classes.  
+//  That bug is that the IRAM_ATTR attribute (any attributes) is lost on template classes.
 //
 //  Further, it was removed from the header to support current Esp32 release
 //  which will need to be removed when the latest GitHub branchis released
